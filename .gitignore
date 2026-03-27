@@ -1,0 +1,19 @@
+# Binary
+emma
+emma.exe
+
+# Build output
+dist/
+
+# Claude Code local settings
+.claude/
+
+# Go test cache
+*.test
+
+# Environment files
+.env
+.env.*
+
+# macOS
+.DS_Store
