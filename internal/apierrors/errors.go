@@ -20,7 +20,7 @@ func Format(err error) error {
 		return fmt.Errorf("network error: %w", urlErr)
 	}
 
-	var genericErr emma.GenericOpenAPIError
+	var genericErr *emma.GenericOpenAPIError
 	if errors.As(err, &genericErr) {
 		body := genericErr.Body()
 		if len(body) > 0 {
@@ -37,7 +37,7 @@ func IsUnauthorized(err error) bool {
 	if err == nil {
 		return false
 	}
-	var genericErr emma.GenericOpenAPIError
+	var genericErr *emma.GenericOpenAPIError
 	if errors.As(err, &genericErr) {
 		return genericErr.Error() == "401 Unauthorized"
 	}
@@ -49,7 +49,7 @@ func IsNotFound(err error) bool {
 	if err == nil {
 		return false
 	}
-	var genericErr emma.GenericOpenAPIError
+	var genericErr *emma.GenericOpenAPIError
 	if errors.As(err, &genericErr) {
 		return genericErr.Error() == "404 Not Found"
 	}
