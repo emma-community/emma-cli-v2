@@ -9,7 +9,10 @@ package cmd
 
 import (
 	"fmt"
+	"log"
+	"net/http"
 	"os"
+	"time"
 
 	"github.com/emma-community/emma-cli/internal/api"
 	"github.com/emma-community/emma-cli/internal/auth"
@@ -72,6 +75,15 @@ func (c *CLI) NewRootCmd() *cobra.Command {
 		ctx = c.Cfg.GetCurrentContext()
 		c.Client = api.NewClient(ctx.AccessToken)
 
+		// Wire up debug HTTP logging
+		if c.Debug {
+			c.Client.GetConfig().HTTPClient = &http.Client{
+				Transport: &debugTransport{base: http.DefaultTransport},
+			}
+			// Re-add auth header since we replaced the client
+			c.Client.GetConfig().AddDefaultHeader("Authorization", "Bearer "+ctx.AccessToken)
+		}
+
 		return nil
 	}
 
@@ -85,9 +97,29 @@ func (c *CLI) NewRootCmd() *cobra.Command {
 	rootCmd.AddCommand(c.newSSHKeyCmd())
 	rootCmd.AddCommand(c.newSubnetCmd())
 	rootCmd.AddCommand(c.newProviderCmd())
+	rootCmd.AddCommand(c.newMCNCmd())
+	rootCmd.AddCommand(c.newWorkflowCmd())
 	rootCmd.AddCommand(c.newConfigCmd())
 	rootCmd.AddCommand(c.newCompletionCmd())
 	rootCmd.AddCommand(c.newVersionCmd())
 
 	return rootCmd
+}
+
+// debugTransport wraps an http.RoundTripper and logs request/response details.
+type debugTransport struct {
+	base http.RoundTripper
+}
+
+func (t *debugTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	start := time.Now()
+	log.Printf("[DEBUG] %s %s", req.Method, req.URL)
+	resp, err := t.base.RoundTrip(req)
+	elapsed := time.Since(start)
+	if err != nil {
+		log.Printf("[DEBUG] %s %s -> error: %v (%s)", req.Method, req.URL, err, elapsed)
+	} else {
+		log.Printf("[DEBUG] %s %s -> %d (%s)", req.Method, req.URL, resp.StatusCode, elapsed)
+	}
+	return resp, err
 }

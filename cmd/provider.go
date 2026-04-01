@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"strconv"
+	"strings"
 
 	emma "github.com/emma-community/emma-go-sdk"
 	apierrors "github.com/emma-community/emma-cli/internal/apierrors"
@@ -10,16 +11,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// newProviderCmd covers provider, location, datacenter, and os list commands.
+// newProviderCmd covers provider, location, datacenter, os, and accelerator list commands.
 func (c *CLI) newProviderCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "provider",
-		Short: "Query providers, locations, datacenters, and operating systems",
+		Short: "Query providers, locations, datacenters, operating systems, and accelerators",
 	}
 	cmd.AddCommand(c.newProviderListCmd())
 	cmd.AddCommand(c.newLocationListCmd())
 	cmd.AddCommand(c.newDatacenterListCmd())
 	cmd.AddCommand(c.newOSListCmd())
+	cmd.AddCommand(c.newAcceleratorListCmd())
 	return cmd
 }
 
@@ -90,6 +92,8 @@ func (c *CLI) newLocationListCmd() *cobra.Command {
 }
 
 func (c *CLI) newDatacenterListCmd() *cobra.Command {
+	var providerFilter string
+
 	cmd := &cobra.Command{
 		Use:   "datacenter-list",
 		Short: "List available datacenters",
@@ -106,8 +110,11 @@ func (c *CLI) newDatacenterListCmd() *cobra.Command {
 
 			rows := make([][]string, 0, len(dcs))
 			for _, dc := range dcs {
-				loc := derefStr(dc.LocationName)
 				provider := derefStr(dc.ProviderName)
+				if providerFilter != "" && !strings.EqualFold(provider, providerFilter) {
+					continue
+				}
+				loc := derefStr(dc.LocationName)
 				rows = append(rows, []string{derefStr(dc.Name), derefStr(dc.Id), loc, provider})
 			}
 
@@ -117,6 +124,8 @@ func (c *CLI) newDatacenterListCmd() *cobra.Command {
 			})
 		},
 	}
+
+	cmd.Flags().StringVar(&providerFilter, "provider", "", "Filter by provider name")
 	return cmd
 }
 
@@ -169,22 +178,29 @@ func (c *CLI) newOSListCmd() *cobra.Command {
 	return cmd
 }
 
-// Standalone top-level commands for location, datacenter, os
-func newLocationCmd(c *CLI) *cobra.Command {
+func (c *CLI) newAcceleratorListCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "location",
-		Short: "Manage locations",
-	}
-	cmd.AddCommand(c.newLocationListTopCmd())
-	return cmd
-}
+		Use:   "accelerator-list",
+		Short: "List available GPU accelerator types",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := context.Background()
+			accs, _, err := c.Client.AcceleratorTypesAPI.GetAcceleratorTypes(ctx).Execute()
+			if err != nil {
+				return apierrors.Format(err)
+			}
 
-func (c *CLI) newLocationListTopCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "list",
-		Short: "List available locations",
-		RunE:  c.newLocationListCmd().RunE,
+			rows := make([][]string, 0, len(accs))
+			for _, a := range accs {
+				rows = append(rows, []string{derefStr(a.AcceleratorType), derefStr(a.Id)})
+			}
+
+			return output.Render(c.Out, c.OutputFmt, c.NoColor, accs, output.TableView{
+				Headers: []string{"TYPE", "ID"},
+				Rows:    rows,
+			})
+		},
 	}
+	return cmd
 }
 
 func providerToRow(p emma.Provider) []string {

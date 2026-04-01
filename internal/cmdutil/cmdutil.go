@@ -1,7 +1,13 @@
 // Package cmdutil provides shared flag helpers for cobra commands.
 package cmdutil
 
-import "github.com/spf13/cobra"
+import (
+	"fmt"
+	"io"
+	"strings"
+
+	"github.com/spf13/cobra"
+)
 
 // OutputFlag adds the --output flag (default "table") to cmd.
 func OutputFlag(cmd *cobra.Command) {
@@ -21,4 +27,17 @@ func ResourceIDFlag(cmd *cobra.Command, name string) {
 // NoColorFlag adds the --no-color flag to cmd.
 func NoColorFlag(cmd *cobra.Command) {
 	cmd.Flags().Bool("no-color", false, "Disable colored output")
+}
+
+// ConfirmDelete prompts the user for confirmation before a destructive action.
+// Returns true if the user confirms, false otherwise.
+// If yes is true, skips the prompt entirely.
+func ConfirmDelete(w io.Writer, r io.Reader, resource string, id any, yes bool) bool {
+	if yes {
+		return true
+	}
+	fmt.Fprintf(w, "Delete %s %v? [y/N] ", resource, id)
+	var input string
+	fmt.Fscan(r, &input)
+	return strings.ToLower(strings.TrimSpace(input)) == "y"
 }

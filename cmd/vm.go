@@ -9,6 +9,8 @@ import (
 
 	emma "github.com/emma-community/emma-go-sdk"
 	apierrors "github.com/emma-community/emma-cli/internal/apierrors"
+	"github.com/emma-community/emma-cli/internal/cmdutil"
+	"github.com/emma-community/emma-cli/internal/completion"
 	"github.com/emma-community/emma-cli/internal/output"
 	"github.com/emma-community/emma-cli/internal/poller"
 	"github.com/spf13/cobra"
@@ -24,6 +26,7 @@ func (c *CLI) newVMCmd() *cobra.Command {
 	cmd.AddCommand(c.newVMCreateCmd())
 	cmd.AddCommand(c.newVMDeleteCmd())
 	cmd.AddCommand(c.newVMActionsCmd())
+	cmd.AddCommand(c.newVMWaitCmd())
 	return cmd
 }
 
@@ -60,32 +63,66 @@ func vmToRow(vm emma.Vm) []string {
 	return []string{name, id, status, osName, vcpu, ram, dc, ip}
 }
 
+func vmToWideRow(vm emma.Vm) []string {
+	row := vmToRow(vm)
+	provider := ""
+	if vm.Provider != nil && vm.Provider.Name != nil {
+		provider = *vm.Provider.Name
+	}
+	cost := ""
+	if vm.Cost != nil && vm.Cost.Price != nil {
+		currency := derefStr(vm.Cost.Currency)
+		cost = fmt.Sprintf("%.2f %s/%s", *vm.Cost.Price, currency, derefStr(vm.Cost.Unit))
+	}
+	return append(row, provider, cost)
+}
+
 func (c *CLI) newVMListCmd() *cobra.Command {
+	var statusFilter string
+	var watchInterval int
+
+	listFn := func() error {
+		ctx := context.Background()
+		req := c.Client.VirtualMachinesAPI.GetVms(ctx)
+		if c.ProjectID != nil {
+			req = req.ProjectId(*c.ProjectID)
+		}
+		vms, _, err := req.Execute()
+		if err != nil {
+			return apierrors.Format(err)
+		}
+
+		rows := make([][]string, 0, len(vms))
+		wideRows := make([][]string, 0, len(vms))
+		for _, vm := range vms {
+			if statusFilter != "" && !strings.EqualFold(derefStr(vm.Status), statusFilter) {
+				continue
+			}
+			rows = append(rows, vmToRow(vm))
+			wideRows = append(wideRows, vmToWideRow(vm))
+		}
+
+		return output.Render(c.Out, c.OutputFmt, c.NoColor, vms, output.TableView{
+			Headers:     []string{"NAME", "ID", "STATUS", "OS", "VCPU", "RAM(GB)", "DATACENTER", "IP"},
+			Rows:        rows,
+			WideHeaders: []string{"NAME", "ID", "STATUS", "OS", "VCPU", "RAM(GB)", "DATACENTER", "IP", "PROVIDER", "COST"},
+			WideRows:    wideRows,
+		})
+	}
+
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List virtual machines",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := context.Background()
-			req := c.Client.VirtualMachinesAPI.GetVms(ctx)
-			if c.ProjectID != nil {
-				req = req.ProjectId(*c.ProjectID)
+			if watchInterval > 0 {
+				return runWatch(cmd.Context(), watchInterval, listFn)
 			}
-			vms, _, err := req.Execute()
-			if err != nil {
-				return apierrors.Format(err)
-			}
-
-			rows := make([][]string, 0, len(vms))
-			for _, vm := range vms {
-				rows = append(rows, vmToRow(vm))
-			}
-
-			return output.Render(c.Out, c.OutputFmt, c.NoColor, vms, output.TableView{
-				Headers: []string{"NAME", "ID", "STATUS", "OS", "VCPU", "RAM(GB)", "DATACENTER", "IP"},
-				Rows:    rows,
-			})
+			return listFn()
 		},
 	}
+
+	cmd.Flags().StringVar(&statusFilter, "status", "", "Filter by status (e.g. RUNNING, STOPPED)")
+	addWatchFlag(cmd, &watchInterval)
 	return cmd
 }
 
@@ -103,8 +140,10 @@ func (c *CLI) newVMGetCmd() *cobra.Command {
 			}
 
 			return output.Render(c.Out, c.OutputFmt, c.NoColor, vm, output.TableView{
-				Headers: []string{"NAME", "ID", "STATUS", "OS", "VCPU", "RAM(GB)", "DATACENTER", "IP"},
-				Rows:    [][]string{vmToRow(*vm)},
+				Headers:     []string{"NAME", "ID", "STATUS", "OS", "VCPU", "RAM(GB)", "DATACENTER", "IP"},
+				Rows:        [][]string{vmToRow(*vm)},
+				WideHeaders: []string{"NAME", "ID", "STATUS", "OS", "VCPU", "RAM(GB)", "DATACENTER", "IP", "PROVIDER", "COST"},
+				WideRows:    [][]string{vmToWideRow(*vm)},
 			})
 		},
 	}
@@ -123,6 +162,26 @@ func (c *CLI) newVMCreateCmd() *cobra.Command {
 		Short: "Create a virtual machine",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
+
+			// Cost preview: query matching configs
+			configReq := c.Client.ComputeInstancesConfigurationsAPI.GetVmConfigs(ctx)
+			configReq = configReq.DataCenterId(datacenterID)
+			configReq = configReq.VCpu(vcpu)
+			configReq = configReq.RamGb(ram)
+			configReq = configReq.VolumeType(volumeType)
+			configReq = configReq.VolumeGb(volumeSize)
+			if c.ProjectID != nil {
+				configReq = configReq.ProjectId(*c.ProjectID)
+			}
+			configResp, _, configErr := configReq.Execute()
+			if configErr == nil && configResp != nil && len(configResp.Content) == 1 {
+				cfg := configResp.Content[0]
+				if cfg.Cost != nil && cfg.Cost.PricePerUnit != nil {
+					currency := derefStr(cfg.Cost.Currency)
+					unit := derefStr(cfg.Cost.Unit)
+					fmt.Fprintf(c.Err, "Estimated cost: %.2f %s/%s\n", *cfg.Cost.PricePerUnit, currency, unit)
+				}
+			}
 
 			createReq := emma.VmCreate{
 				Name:             name,
@@ -151,7 +210,6 @@ func (c *CLI) newVMCreateCmd() *cobra.Command {
 			pollErr := poller.WaitFor(ctx, 5*time.Second, 60*time.Second, func() (bool, error) {
 				updated, _, err := c.Client.VirtualMachinesAPI.GetVm(ctx, vmID).Execute()
 				if err != nil {
-					// Propagate permanent errors (VM gone or access revoked); retry transient ones.
 					if apierrors.IsNotFound(err) || apierrors.IsUnauthorized(err) {
 						return false, apierrors.Format(err)
 					}
@@ -199,6 +257,12 @@ func (c *CLI) newVMCreateCmd() *cobra.Command {
 	_ = cmd.MarkFlagRequired("volume-type")
 	_ = cmd.MarkFlagRequired("cloud-network-type")
 
+	// Dynamic completions
+	if c.Client != nil {
+		_ = cmd.RegisterFlagCompletionFunc("datacenter-id", completion.DatacenterIDs(c.Client))
+		_ = cmd.RegisterFlagCompletionFunc("os-id", completion.OSIDs(c.Client))
+	}
+
 	return cmd
 }
 
@@ -210,14 +274,9 @@ func (c *CLI) newVMDeleteCmd() *cobra.Command {
 		Use:   "delete",
 		Short: "Delete a virtual machine",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !yes {
-				fmt.Fprintf(c.Err, "Delete VM %d? [y/N] ", id)
-				var input string
-				fmt.Fscan(cmd.InOrStdin(), &input)
-				if strings.ToLower(strings.TrimSpace(input)) != "y" {
-					fmt.Fprintln(c.Out, "Aborted.")
-					return nil
-				}
+			if !cmdutil.ConfirmDelete(c.Err, cmd.InOrStdin(), "VM", id, yes) {
+				fmt.Fprintln(c.Out, "Aborted.")
+				return nil
 			}
 
 			ctx := context.Background()
@@ -243,6 +302,7 @@ func (c *CLI) newVMActionsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "actions",
 		Short: "Perform an action on a virtual machine",
+		Long:  "Supported actions: clone, start, shutdown, reboot, rename, transfer",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
 
@@ -260,8 +320,19 @@ func (c *CLI) newVMActionsCmd() *cobra.Command {
 				req.VmShutdown = emma.NewVmShutdown("shutdown")
 			case "reboot":
 				req.VmReboot = emma.NewVmReboot("reboot")
+			case "rename":
+				if newName == "" {
+					return fmt.Errorf("--name is required for rename action")
+				}
+				rename := emma.NewVmRename("rename", newName)
+				req.VmRename = rename
+			case "transfer":
+				if newName == "" {
+					return fmt.Errorf("--name (target datacenter ID) is required for transfer action")
+				}
+				req.VmTransfer = emma.NewVmTransfer("transfer", newName)
 			default:
-				return fmt.Errorf("unknown action %q (supported: clone, start, shutdown, reboot)", action)
+				return fmt.Errorf("unknown action %q (supported: clone, start, shutdown, reboot, rename, transfer)", action)
 			}
 
 			vm, _, err := c.Client.VirtualMachinesAPI.VmActions(ctx, id).VmActionsRequest(req).Execute()
@@ -280,10 +351,53 @@ func (c *CLI) newVMActionsCmd() *cobra.Command {
 	}
 
 	cmd.Flags().Int32Var(&id, "id", 0, "VM ID")
-	cmd.Flags().StringVar(&action, "action", "", "Action to perform (clone, start, shutdown, reboot)")
-	cmd.Flags().StringVar(&newName, "name", "", "New name (for clone)")
+	cmd.Flags().StringVar(&action, "action", "", "Action to perform (clone, start, shutdown, reboot, rename, transfer)")
+	cmd.Flags().StringVar(&newName, "name", "", "New name (for clone or rename)")
 	_ = cmd.MarkFlagRequired("id")
 	_ = cmd.MarkFlagRequired("action")
+	return cmd
+}
+
+func (c *CLI) newVMWaitCmd() *cobra.Command {
+	var id int32
+	var state string
+	var timeout int
+
+	cmd := &cobra.Command{
+		Use:   "wait",
+		Short: "Wait for a VM to reach a target state",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := context.Background()
+			fmt.Fprintf(c.Err, "Waiting for VM %d to reach state %q...\n", id, state)
+
+			err := poller.WaitFor(ctx, 5*time.Second, time.Duration(timeout)*time.Second, func() (bool, error) {
+				vm, _, err := c.Client.VirtualMachinesAPI.GetVm(ctx, id).Execute()
+				if err != nil {
+					if apierrors.IsNotFound(err) || apierrors.IsUnauthorized(err) {
+						return false, apierrors.Format(err)
+					}
+					return false, nil
+				}
+				if strings.EqualFold(derefStr(vm.Status), state) {
+					return true, nil
+				}
+				fmt.Fprint(c.Err, ".")
+				return false, nil
+			})
+			fmt.Fprintln(c.Err)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(c.Out, "VM %d reached state %q.\n", id, state)
+			return nil
+		},
+	}
+
+	cmd.Flags().Int32Var(&id, "id", 0, "VM ID (required)")
+	cmd.Flags().StringVar(&state, "state", "", "Target state to wait for, e.g. RUNNING, STOPPED (required)")
+	cmd.Flags().IntVar(&timeout, "timeout", 300, "Timeout in seconds (default: 300)")
+	_ = cmd.MarkFlagRequired("id")
+	_ = cmd.MarkFlagRequired("state")
 	return cmd
 }
 

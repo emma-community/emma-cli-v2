@@ -1,6 +1,6 @@
 github.com/cpuguy83/go-md2man/v2 v2.0.4/go.mod h1:tgQtvFlXSQOSOSIRvRPT7W67SCa46tRHOmNcaadrF8o=
-github.com/emma-community/emma-go-sdk v0.0.11 h1:aH95yqEstyW3tPMVU3byu1vosU7qxI3ki5l7UE56y/I=
-github.com/emma-community/emma-go-sdk v0.0.11/go.mod h1:rJ3Y65uAOTNKJ+DSdMPTMQywycAr5aX6KEGXMXRoXqI=
+github.com/emma-community/emma-go-sdk v0.0.12 h1:f3B1drxOUXw/WDdlLGn48N/3uvccw1ngfxZ0aubXY64=
+github.com/emma-community/emma-go-sdk v0.0.12/go.mod h1:rJ3Y65uAOTNKJ+DSdMPTMQywycAr5aX6KEGXMXRoXqI=
 github.com/fatih/color v1.17.0 h1:GlRw1BRJxkpqUCBKzKOw098ed57fEsKeNjpTe3cSjK4=
 github.com/fatih/color v1.17.0/go.mod h1:YZ7TlrGPkiz6ku9fK3TLD/pl3CpsiFyu8N92HLgmosI=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=

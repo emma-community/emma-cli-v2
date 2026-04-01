@@ -20,6 +20,10 @@ func (c *CLI) newConfigCmd() *cobra.Command {
 	cmd.AddCommand(c.newConfigGetContextsCmd())
 	cmd.AddCommand(c.newConfigUseContextCmd())
 	cmd.AddCommand(c.newConfigDeleteContextCmd())
+
+	// Resource configuration listing (requires auth)
+	c.addConfigResourceCmds(cmd)
+
 	return cmd
 }
 
