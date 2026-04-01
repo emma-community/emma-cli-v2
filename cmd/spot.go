@@ -1,15 +1,17 @@
 package cmd
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	emma "github.com/emma-community/emma-go-sdk"
 	apierrors "github.com/emma-community/emma-cli/internal/apierrors"
+	"github.com/emma-community/emma-cli/internal/cmdutil"
 	"github.com/emma-community/emma-cli/internal/output"
+	"github.com/emma-community/emma-cli/internal/poller"
 	"github.com/spf13/cobra"
 )
 
@@ -22,6 +24,8 @@ func (c *CLI) newSpotCmd() *cobra.Command {
 	cmd.AddCommand(c.newSpotGetCmd())
 	cmd.AddCommand(c.newSpotCreateCmd())
 	cmd.AddCommand(c.newSpotDeleteCmd())
+	cmd.AddCommand(c.newSpotActionsCmd())
+	cmd.AddCommand(c.newSpotWaitCmd())
 	return cmd
 }
 
@@ -58,7 +62,23 @@ func spotToRow(s emma.SpotVm) []string {
 	return []string{name, id, status, osName, vcpu, ram, dc, ip}
 }
 
+func spotToWideRow(s emma.SpotVm) []string {
+	row := spotToRow(s)
+	provider := ""
+	if s.Provider != nil && s.Provider.Name != nil {
+		provider = *s.Provider.Name
+	}
+	cost := ""
+	if s.Cost != nil && s.Cost.Price != nil {
+		currency := derefStr(s.Cost.Currency)
+		cost = fmt.Sprintf("%.2f %s/%s", *s.Cost.Price, currency, derefStr(s.Cost.Unit))
+	}
+	return append(row, provider, cost)
+}
+
 func (c *CLI) newSpotListCmd() *cobra.Command {
+	var statusFilter string
+
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List spot instances",
@@ -74,16 +94,25 @@ func (c *CLI) newSpotListCmd() *cobra.Command {
 			}
 
 			rows := make([][]string, 0, len(spots))
+			wideRows := make([][]string, 0, len(spots))
 			for _, s := range spots {
+				if statusFilter != "" && !strings.EqualFold(derefStr(s.Status), statusFilter) {
+					continue
+				}
 				rows = append(rows, spotToRow(s))
+				wideRows = append(wideRows, spotToWideRow(s))
 			}
 
 			return output.Render(c.Out, c.OutputFmt, c.NoColor, spots, output.TableView{
-				Headers: []string{"NAME", "ID", "STATUS", "OS", "VCPU", "RAM(GB)", "DATACENTER", "IP"},
-				Rows:    rows,
+				Headers:     []string{"NAME", "ID", "STATUS", "OS", "VCPU", "RAM(GB)", "DATACENTER", "IP"},
+				Rows:        rows,
+				WideHeaders: []string{"NAME", "ID", "STATUS", "OS", "VCPU", "RAM(GB)", "DATACENTER", "IP", "PROVIDER", "COST"},
+				WideRows:    wideRows,
 			})
 		},
 	}
+
+	cmd.Flags().StringVar(&statusFilter, "status", "", "Filter by status")
 	return cmd
 }
 
@@ -101,8 +130,10 @@ func (c *CLI) newSpotGetCmd() *cobra.Command {
 			}
 
 			return output.Render(c.Out, c.OutputFmt, c.NoColor, spot, output.TableView{
-				Headers: []string{"NAME", "ID", "STATUS", "OS", "VCPU", "RAM(GB)", "DATACENTER", "IP"},
-				Rows:    [][]string{spotToRow(*spot)},
+				Headers:     []string{"NAME", "ID", "STATUS", "OS", "VCPU", "RAM(GB)", "DATACENTER", "IP"},
+				Rows:        [][]string{spotToRow(*spot)},
+				WideHeaders: []string{"NAME", "ID", "STATUS", "OS", "VCPU", "RAM(GB)", "DATACENTER", "IP", "PROVIDER", "COST"},
+				WideRows:    [][]string{spotToWideRow(*spot)},
 			})
 		},
 	}
@@ -179,16 +210,9 @@ func (c *CLI) newSpotDeleteCmd() *cobra.Command {
 		Use:   "delete",
 		Short: "Delete a spot instance",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !yes {
-				fmt.Fprintf(c.Err, "Delete spot instance %d? [y/N] ", id)
-				reader := bufio.NewReader(strings.NewReader(""))
-				_ = reader
-				var input string
-				fmt.Fscan(cmd.InOrStdin(), &input)
-				if strings.ToLower(strings.TrimSpace(input)) != "y" {
-					fmt.Fprintln(c.Out, "Aborted.")
-					return nil
-				}
+			if !cmdutil.ConfirmDelete(c.Err, cmd.InOrStdin(), "spot instance", id, yes) {
+				fmt.Fprintln(c.Out, "Aborted.")
+				return nil
 			}
 
 			ctx := context.Background()
@@ -204,5 +228,103 @@ func (c *CLI) newSpotDeleteCmd() *cobra.Command {
 	cmd.Flags().Int32Var(&id, "id", 0, "Spot instance ID")
 	cmd.Flags().BoolVar(&yes, "yes", false, "Skip confirmation")
 	_ = cmd.MarkFlagRequired("id")
+	return cmd
+}
+
+func (c *CLI) newSpotActionsCmd() *cobra.Command {
+	var id int32
+	var action, newName string
+	var price float32
+
+	cmd := &cobra.Command{
+		Use:   "actions",
+		Short: "Perform an action on a spot instance",
+		Long:  "Supported actions: start, shutdown, reboot, rename, change-price",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := context.Background()
+
+			var req emma.SpotActionsRequest
+			switch strings.ToLower(action) {
+			case "start":
+				req.SpotStart = emma.NewSpotStart("start")
+			case "shutdown":
+				req.SpotShutdown = emma.NewSpotShutdown("shutdown")
+			case "reboot":
+				req.SpotReboot = emma.NewSpotReboot("reboot")
+			case "rename":
+				if newName == "" {
+					return fmt.Errorf("--name is required for rename action")
+				}
+				req.SpotRename = emma.NewSpotRename("rename", newName)
+			case "change-price":
+				req.SpotChangePrice = emma.NewSpotChangePrice("changePrice", price)
+			default:
+				return fmt.Errorf("unknown action %q (supported: start, shutdown, reboot, rename, change-price)", action)
+			}
+
+			spot, _, err := c.Client.SpotInstancesAPI.SpotActions(ctx, id).SpotActionsRequest(req).Execute()
+			if err != nil {
+				return apierrors.Format(err)
+			}
+			if spot == nil {
+				fmt.Fprintf(c.Out, "Action %q performed on spot instance %d.\n", action, id)
+				return nil
+			}
+			return output.Render(c.Out, c.OutputFmt, c.NoColor, spot, output.TableView{
+				Headers: []string{"NAME", "ID", "STATUS", "OS", "VCPU", "RAM(GB)", "DATACENTER", "IP"},
+				Rows:    [][]string{spotToRow(*spot)},
+			})
+		},
+	}
+
+	cmd.Flags().Int32Var(&id, "id", 0, "Spot instance ID")
+	cmd.Flags().StringVar(&action, "action", "", "Action: start, shutdown, reboot, rename, change-price")
+	cmd.Flags().StringVar(&newName, "name", "", "New name (for rename)")
+	cmd.Flags().Float32Var(&price, "price", 0, "New price (for change-price)")
+	_ = cmd.MarkFlagRequired("id")
+	_ = cmd.MarkFlagRequired("action")
+	return cmd
+}
+
+func (c *CLI) newSpotWaitCmd() *cobra.Command {
+	var id int32
+	var state string
+	var timeout int
+
+	cmd := &cobra.Command{
+		Use:   "wait",
+		Short: "Wait for a spot instance to reach a target state",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := context.Background()
+			fmt.Fprintf(c.Err, "Waiting for spot instance %d to reach state %q...\n", id, state)
+
+			err := poller.WaitFor(ctx, 5*time.Second, time.Duration(timeout)*time.Second, func() (bool, error) {
+				spot, _, err := c.Client.SpotInstancesAPI.GetSpot(ctx, id).Execute()
+				if err != nil {
+					if apierrors.IsNotFound(err) || apierrors.IsUnauthorized(err) {
+						return false, apierrors.Format(err)
+					}
+					return false, nil
+				}
+				if strings.EqualFold(derefStr(spot.Status), state) {
+					return true, nil
+				}
+				fmt.Fprint(c.Err, ".")
+				return false, nil
+			})
+			fmt.Fprintln(c.Err)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(c.Out, "Spot instance %d reached state %q.\n", id, state)
+			return nil
+		},
+	}
+
+	cmd.Flags().Int32Var(&id, "id", 0, "Spot instance ID (required)")
+	cmd.Flags().StringVar(&state, "state", "", "Target state (required)")
+	cmd.Flags().IntVar(&timeout, "timeout", 300, "Timeout in seconds")
+	_ = cmd.MarkFlagRequired("id")
+	_ = cmd.MarkFlagRequired("state")
 	return cmd
 }

@@ -1,14 +1,13 @@
 package cmd
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"strconv"
-	"strings"
 
 	emma "github.com/emma-community/emma-go-sdk"
 	apierrors "github.com/emma-community/emma-cli/internal/apierrors"
+	"github.com/emma-community/emma-cli/internal/cmdutil"
 	"github.com/emma-community/emma-cli/internal/output"
 	"github.com/spf13/cobra"
 )
@@ -148,16 +147,9 @@ func (c *CLI) newVolumeDeleteCmd() *cobra.Command {
 		Use:   "delete",
 		Short: "Delete a volume",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !yes {
-				fmt.Fprintf(c.Err, "Delete volume %d? [y/N] ", id)
-				reader := bufio.NewReader(strings.NewReader(""))
-				_ = reader
-				var input string
-				fmt.Fscan(cmd.InOrStdin(), &input)
-				if strings.ToLower(strings.TrimSpace(input)) != "y" {
-					fmt.Fprintln(c.Out, "Aborted.")
-					return nil
-				}
+			if !cmdutil.ConfirmDelete(c.Err, cmd.InOrStdin(), "volume", id, yes) {
+				fmt.Fprintln(c.Out, "Aborted.")
+				return nil
 			}
 
 			ctx := context.Background()

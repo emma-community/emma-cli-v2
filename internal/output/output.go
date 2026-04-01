@@ -4,7 +4,8 @@
 //
 //	data any ──► format? ──► "json"  ──► json.NewEncoder(w).Encode(data)
 //	                     ├─► "yaml"  ──► yaml.Marshal(data) → w
-//	                     └─► "table" ──► TableView.Rows → tablewriter → w
+//	                     ├─► "wide"  ──► WideHeaders/WideRows → tablewriter → w
+//	                     └─► "table" ──► Headers/Rows → tablewriter → w
 //	                                         │
 //	                                         └─► colorize STATUS col if TTY && !noColor
 package output
@@ -23,9 +24,12 @@ import (
 )
 
 // TableView holds the headers and rows for table rendering.
+// WideHeaders/WideRows are used when --output wide is selected.
 type TableView struct {
-	Headers []string
-	Rows    [][]string
+	Headers     []string
+	Rows        [][]string
+	WideHeaders []string
+	WideRows    [][]string
 }
 
 // statusColorMap maps status strings to color attributes.
@@ -57,10 +61,13 @@ func colorizeStatus(status string) string {
 }
 
 // Render outputs data in the requested format to w.
-// - table: uses tablewriter, colorizes STATUS column when !noColor and stdout is a TTY
-// - json:  json.NewEncoder(w).Encode(data) — typed struct, not string rows
-// - yaml:  yaml.v3 Marshal
-// - zero rows/nil data: prints "No items found." for table, `[]` for json
+//
+//	data any ──► format? ──► "json"  ──► json.NewEncoder(w).Encode(data)
+//	                     ├─► "yaml"  ──► yaml.Marshal(data) → w
+//	                     ├─► "wide"  ──► WideHeaders/WideRows → tablewriter → w
+//	                     └─► "table" ──► Headers/Rows → tablewriter → w
+//	                                         │
+//	                                         └─► colorize STATUS col if TTY && !noColor
 func Render(w io.Writer, format string, noColor bool, data any, table TableView) error {
 	switch strings.ToLower(format) {
 	case "json":
@@ -82,38 +89,55 @@ func Render(w io.Writer, format string, noColor bool, data any, table TableView)
 		_, err = w.Write(out)
 		return err
 
+	case "wide":
+		headers := table.WideHeaders
+		rows := table.WideRows
+		if len(headers) == 0 {
+			// Fall back to normal table if wide not defined
+			headers = table.Headers
+			rows = table.Rows
+		}
+		if len(rows) == 0 {
+			_, err := fmt.Fprintln(w, "No items found.")
+			return err
+		}
+		return renderTable(w, noColor, headers, rows)
+
 	default: // table
 		if len(table.Rows) == 0 {
 			_, err := fmt.Fprintln(w, "No items found.")
 			return err
 		}
-
-		isTTY := term.IsTerminal(int(os.Stdout.Fd()))
-		useColor := !noColor && isTTY && !color.NoColor
-		statusIdx := statusColIndex(table.Headers)
-
-		tw := tablewriter.NewWriter(w)
-		tw.SetHeader(table.Headers)
-		tw.SetBorder(false)
-		tw.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
-		tw.SetAlignment(tablewriter.ALIGN_LEFT)
-		tw.SetHeaderLine(false)
-		tw.SetColumnSeparator("  ")
-		tw.SetTablePadding("  ")
-		tw.SetNoWhiteSpace(true)
-		tw.SetAutoFormatHeaders(false)
-
-		for _, row := range table.Rows {
-			if useColor && statusIdx >= 0 && statusIdx < len(row) {
-				rowCopy := make([]string, len(row))
-				copy(rowCopy, row)
-				rowCopy[statusIdx] = colorizeStatus(row[statusIdx])
-				tw.Append(rowCopy)
-			} else {
-				tw.Append(row)
-			}
-		}
-		tw.Render()
-		return nil
+		return renderTable(w, noColor, table.Headers, table.Rows)
 	}
+}
+
+func renderTable(w io.Writer, noColor bool, headers []string, rows [][]string) error {
+	isTTY := term.IsTerminal(int(os.Stdout.Fd()))
+	useColor := !noColor && isTTY && !color.NoColor
+	statusIdx := statusColIndex(headers)
+
+	tw := tablewriter.NewWriter(w)
+	tw.SetHeader(headers)
+	tw.SetBorder(false)
+	tw.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
+	tw.SetAlignment(tablewriter.ALIGN_LEFT)
+	tw.SetHeaderLine(false)
+	tw.SetColumnSeparator("  ")
+	tw.SetTablePadding("  ")
+	tw.SetNoWhiteSpace(true)
+	tw.SetAutoFormatHeaders(false)
+
+	for _, row := range rows {
+		if useColor && statusIdx >= 0 && statusIdx < len(row) {
+			rowCopy := make([]string, len(row))
+			copy(rowCopy, row)
+			rowCopy[statusIdx] = colorizeStatus(row[statusIdx])
+			tw.Append(rowCopy)
+		} else {
+			tw.Append(row)
+		}
+	}
+	tw.Render()
+	return nil
 }

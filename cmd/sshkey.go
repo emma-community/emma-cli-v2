@@ -1,14 +1,13 @@
 package cmd
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"strconv"
-	"strings"
 
 	emma "github.com/emma-community/emma-go-sdk"
 	apierrors "github.com/emma-community/emma-cli/internal/apierrors"
+	"github.com/emma-community/emma-cli/internal/cmdutil"
 	"github.com/emma-community/emma-cli/internal/output"
 	"github.com/spf13/cobra"
 )
@@ -21,6 +20,7 @@ func (c *CLI) newSSHKeyCmd() *cobra.Command {
 	cmd.AddCommand(c.newSSHKeyListCmd())
 	cmd.AddCommand(c.newSSHKeyGetCmd())
 	cmd.AddCommand(c.newSSHKeyCreateCmd())
+	cmd.AddCommand(c.newSSHKeyUpdateCmd())
 	cmd.AddCommand(c.newSSHKeyDeleteCmd())
 	return cmd
 }
@@ -98,14 +98,12 @@ func (c *CLI) newSSHKeyCreateCmd() *cobra.Command {
 
 			var createReq emma.SshKeysCreateImportRequest
 			if publicKey != "" {
-				// Import existing key
 				importKey := emma.SshKeyImport{
 					Name: name,
 					Key:  publicKey,
 				}
 				createReq.SshKeyImport = &importKey
 			} else {
-				// Generate new key
 				if keyType == "" {
 					keyType = "RSA"
 				}
@@ -121,8 +119,6 @@ func (c *CLI) newSSHKeyCreateCmd() *cobra.Command {
 				return apierrors.Format(err)
 			}
 
-			// The response is SshKeysCreateImport201Response which wraps either SshKey or generated key
-			// Try to extract a SshKey for display
 			var key emma.SshKey
 			if resp.SshKey != nil {
 				key = *resp.SshKey
@@ -142,6 +138,39 @@ func (c *CLI) newSSHKeyCreateCmd() *cobra.Command {
 	return cmd
 }
 
+func (c *CLI) newSSHKeyUpdateCmd() *cobra.Command {
+	var id int32
+	var name string
+
+	cmd := &cobra.Command{
+		Use:   "update",
+		Short: "Update an SSH key name",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := context.Background()
+
+			updateReq := emma.SshKeyUpdate{
+				Name: name,
+			}
+
+			key, _, err := c.Client.SSHKeysAPI.SshKeyUpdate(ctx, id).SshKeyUpdate(updateReq).Execute()
+			if err != nil {
+				return apierrors.Format(err)
+			}
+
+			return output.Render(c.Out, c.OutputFmt, c.NoColor, key, output.TableView{
+				Headers: []string{"NAME", "ID", "TYPE", "FINGERPRINT", "CREATED-AT"},
+				Rows:    [][]string{sshKeyToRow(*key)},
+			})
+		},
+	}
+
+	cmd.Flags().Int32Var(&id, "id", 0, "SSH key ID (required)")
+	cmd.Flags().StringVar(&name, "name", "", "New name (required)")
+	_ = cmd.MarkFlagRequired("id")
+	_ = cmd.MarkFlagRequired("name")
+	return cmd
+}
+
 func (c *CLI) newSSHKeyDeleteCmd() *cobra.Command {
 	var id int32
 	var yes bool
@@ -150,16 +179,9 @@ func (c *CLI) newSSHKeyDeleteCmd() *cobra.Command {
 		Use:   "delete",
 		Short: "Delete an SSH key",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !yes {
-				fmt.Fprintf(c.Err, "Delete SSH key %d? [y/N] ", id)
-				reader := bufio.NewReader(strings.NewReader(""))
-				_ = reader
-				var input string
-				fmt.Fscan(cmd.InOrStdin(), &input)
-				if strings.ToLower(strings.TrimSpace(input)) != "y" {
-					fmt.Fprintln(c.Out, "Aborted.")
-					return nil
-				}
+			if !cmdutil.ConfirmDelete(c.Err, cmd.InOrStdin(), "SSH key", id, yes) {
+				fmt.Fprintln(c.Out, "Aborted.")
+				return nil
 			}
 
 			ctx := context.Background()

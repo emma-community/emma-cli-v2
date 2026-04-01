@@ -3,7 +3,7 @@ module github.com/emma-community/emma-cli
 go 1.22.0
 
 require (
-	github.com/emma-community/emma-go-sdk v0.0.11
+	github.com/emma-community/emma-go-sdk v0.0.12
 	github.com/fatih/color v1.17.0
 	github.com/olekukonko/tablewriter v0.0.5
 	github.com/spf13/cobra v1.8.1
