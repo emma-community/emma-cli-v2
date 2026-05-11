@@ -145,7 +145,7 @@ func (c *CLI) newSpotGetCmd() *cobra.Command {
 
 func (c *CLI) newSpotCreateCmd() *cobra.Command {
 	var name, datacenterID, cloudNetworkType, volumeType, vcpuType string
-	var osID, vcpu, ram, volumeSize int32
+	var osID, vcpu, ram, volumeSize, sshKeyID int32
 	var price float32
 
 	cmd := &cobra.Command{
@@ -165,6 +165,10 @@ func (c *CLI) newSpotCreateCmd() *cobra.Command {
 				VolumeType:       volumeType,
 				VolumeGb:         volumeSize,
 				Price:            price,
+			}
+
+			if cmd.Flags().Changed("ssh-key-id") {
+				createReq.SshKeyId = &sshKeyID
 			}
 
 			spot, _, err := c.Client.SpotInstancesAPI.SpotCreate(ctx).SpotCreate(createReq).Execute()
@@ -189,6 +193,7 @@ func (c *CLI) newSpotCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&cloudNetworkType, "cloud-network-type", "", "Cloud network type (required)")
 	cmd.Flags().StringVar(&vcpuType, "vcpu-type", "shared", "vCPU type")
 	cmd.Flags().Float32Var(&price, "price", 0, "Max price per hour")
+	cmd.Flags().Int32Var(&sshKeyID, "ssh-key-id", 0, "SSH key ID to inject (see `emma sshkey list`)")
 
 	_ = cmd.MarkFlagRequired("name")
 	_ = cmd.MarkFlagRequired("datacenter-id")
