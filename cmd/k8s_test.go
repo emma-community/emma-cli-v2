@@ -76,16 +76,19 @@ func TestK8sCreate(t *testing.T) {
 			if req.Name != "new-cluster" {
 				t.Errorf("expected name 'new-cluster', got %q", req.Name)
 			}
-			if req.K8sConnectionType != "InternetConnect" {
-				t.Errorf("expected connection type 'InternetConnect', got %q", req.K8sConnectionType)
+			if req.DeploymentLocation != "eu" {
+				t.Errorf("expected deployment location 'eu', got %q", req.DeploymentLocation)
+			}
+			if req.K8sConnectionType != "internet_connect" {
+				t.Errorf("expected connection type 'internet_connect', got %q", req.K8sConnectionType)
 			}
 
 			json.NewEncoder(w).Encode(emma.KubernetesCreateResponse{
 				Id:                 int32Ptr(10),
 				Name:               strPtr("new-cluster"),
 				Status:             strPtr("CREATING"),
-				K8sConnectionType:  strPtr("InternetConnect"),
-				DeploymentLocation: strPtr("EU"),
+				K8sConnectionType:  strPtr("internet_connect"),
+				DeploymentLocation: strPtr("eu"),
 			})
 			return
 		}
@@ -101,6 +104,33 @@ func TestK8sCreate(t *testing.T) {
 	}
 	if !strings.Contains(cliOut(c), "new-cluster") {
 		t.Errorf("expected 'new-cluster' in output")
+	}
+}
+
+func TestNormalizeDeploymentLocation(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"EU", "eu"}, {"eu", "eu"}, {"Us", "us"}, {"APAC", "apac"},
+	}
+	for _, tc := range cases {
+		if got := normalizeDeploymentLocation(tc.in); got != tc.want {
+			t.Errorf("normalizeDeploymentLocation(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestNormalizeConnectionType(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"InternetConnect", "internet_connect"},
+		{"DirectConnect", "direct_connect"},
+		{"internet_connect", "internet_connect"},
+		{"direct_connect", "direct_connect"},
+		{"INTERNETCONNECT", "internet_connect"},
+		{"DIRECTCONNECT", "direct_connect"},
+	}
+	for _, tc := range cases {
+		if got := normalizeConnectionType(tc.in); got != tc.want {
+			t.Errorf("normalizeConnectionType(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }
 

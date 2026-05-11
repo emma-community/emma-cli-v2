@@ -6,10 +6,10 @@ import (
 	"strconv"
 	"strings"
 
-	emma "github.com/emma-community/emma-go-sdk"
 	apierrors "github.com/emma-community/emma-cli/internal/apierrors"
 	"github.com/emma-community/emma-cli/internal/cmdutil"
 	"github.com/emma-community/emma-cli/internal/output"
+	emma "github.com/emma-community/emma-go-sdk"
 	"github.com/spf13/cobra"
 )
 
@@ -140,8 +140,8 @@ func (c *CLI) newK8sCreateCmd() *cobra.Command {
 
 			createReq := emma.KubernetesCreateRequest{
 				Name:               name,
-				DeploymentLocation: deploymentLocation,
-				K8sConnectionType:  connectionType,
+				DeploymentLocation: normalizeDeploymentLocation(deploymentLocation),
+				K8sConnectionType:  normalizeConnectionType(connectionType),
 				WorkerNodes:        workerNodes,
 			}
 			if version != "" {
@@ -161,8 +161,8 @@ func (c *CLI) newK8sCreateCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&name, "name", "", "Cluster name (required)")
-	cmd.Flags().StringVar(&deploymentLocation, "deployment-location", "", "Deployment location (required)")
-	cmd.Flags().StringVar(&connectionType, "connection-type", "", "K8s connection type: DirectConnect or InternetConnect (required)")
+	cmd.Flags().StringVar(&deploymentLocation, "deployment-location", "", "Deployment location: eu, us, apac (required)")
+	cmd.Flags().StringVar(&connectionType, "connection-type", "", "K8s connection type: internet_connect or direct_connect (required)")
 	cmd.Flags().StringVar(&version, "version", "", "Kubernetes version")
 
 	// Worker node flags
@@ -233,6 +233,22 @@ func (c *CLI) newK8sEditCmd() *cobra.Command {
 
 	_ = cmd.MarkFlagRequired("id")
 	return cmd
+}
+
+func normalizeDeploymentLocation(s string) string {
+	return strings.ToLower(strings.TrimSpace(s))
+}
+
+func normalizeConnectionType(s string) string {
+	v := strings.ToLower(strings.TrimSpace(s))
+	switch v {
+	case "directconnect":
+		return "direct_connect"
+	case "internetconnect":
+		return "internet_connect"
+	default:
+		return v
+	}
 }
 
 func (c *CLI) newK8sDeleteCmd() *cobra.Command {
