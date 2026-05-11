@@ -51,6 +51,7 @@ Credentials are stored in `~/.emma/config.yaml` (mode `0600`). Multiple named co
 |---|---|
 | `EMMA_CLIENT_ID` | Client ID (alternative to `--client-id`) |
 | `EMMA_CLIENT_SECRET` | Client secret (avoids interactive prompt) |
+| `EMMA_API_URL` | Override API base URL (e.g. `https://api.staging.emma.ms/external`) |
 | `NO_COLOR` | Disable colored output |
 
 ## Usage
@@ -139,13 +140,13 @@ emma vm create \
 emma config vm-configs --datacenter-id dc-1 --vcpu 4
 
 # List available K8s node configurations
-emma config k8s-configs --connection-type InternetConnect
+emma config k8s-configs --connection-type internet_connect
 
 # Create a Kubernetes cluster with worker nodes
 emma k8s create \
   --name my-cluster \
-  --deployment-location EU \
-  --connection-type InternetConnect \
+  --deployment-location eu \
+  --connection-type internet_connect \
   --worker-name default \
   --worker-datacenter-id dc-1 \
   --worker-vcpu 4 \
