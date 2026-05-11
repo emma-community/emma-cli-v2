@@ -18,13 +18,13 @@ import (
 	"time"
 
 	emma "github.com/emma-community/emma-go-sdk"
+	"github.com/emma-community/emma-cli/internal/api"
 	"github.com/emma-community/emma-cli/internal/config"
 )
 
 // IssueToken requests a new access+refresh token pair using clientID and clientSecret.
 func IssueToken(clientID, clientSecret string) (*emma.Token, error) {
-	cfg := emma.NewConfiguration()
-	client := emma.NewAPIClient(cfg)
+	client := api.NewAnonymousClient()
 
 	creds := emma.NewCredentials(clientID, clientSecret)
 	req := client.AuthenticationAPI.IssueToken(context.Background()).Credentials(*creds)
@@ -37,8 +37,7 @@ func IssueToken(clientID, clientSecret string) (*emma.Token, error) {
 
 // RefreshToken obtains a new access token using the provided refresh token.
 func RefreshToken(refreshToken string) (*emma.Token, error) {
-	cfg := emma.NewConfiguration()
-	client := emma.NewAPIClient(cfg)
+	client := api.NewAnonymousClient()
 
 	rt := emma.NewRefreshToken(refreshToken)
 	req := client.AuthenticationAPI.RefreshToken(context.Background()).RefreshToken(*rt)
