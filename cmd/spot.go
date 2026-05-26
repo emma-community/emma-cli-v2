@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	emma "github.com/emma-community/emma-go-sdk"
 	apierrors "github.com/emma-community/emma-cli/internal/apierrors"
 	"github.com/emma-community/emma-cli/internal/cmdutil"
 	"github.com/emma-community/emma-cli/internal/output"
 	"github.com/emma-community/emma-cli/internal/poller"
+	emma "github.com/emma-community/emma-go-sdk"
 	"github.com/spf13/cobra"
 )
 
@@ -144,15 +144,34 @@ func (c *CLI) newSpotGetCmd() *cobra.Command {
 }
 
 func (c *CLI) newSpotCreateCmd() *cobra.Command {
-	var name, datacenterID, cloudNetworkType, volumeType, vcpuType string
-	var osID, vcpu, ram, volumeSize, sshKeyID int32
-	var price float32
+	var name, datacenterID, cloudNetworkType, volumeType, vcpuType, acceleratorTypeID string
+	var osID, vcpu, ram, volumeSize, sshKeyID, securityGroupID int32
+	var price, accelerators float32
 
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a spot instance",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
+
+			configReq := c.Client.ComputeInstancesConfigurationsAPI.GetSpotConfigs(ctx)
+			configReq = configReq.DataCenterId(datacenterID)
+			configReq = configReq.VCpu(vcpu)
+			configReq = configReq.RamGb(ram)
+			configReq = configReq.VolumeType(volumeType)
+			configReq = configReq.VolumeGb(volumeSize)
+			if c.ProjectID != nil {
+				configReq = configReq.ProjectId(*c.ProjectID)
+			}
+			configResp, _, configErr := configReq.Execute()
+			if configErr == nil && configResp != nil && len(configResp.Content) == 1 {
+				cfg := configResp.Content[0]
+				if cfg.Cost != nil && cfg.Cost.PricePerUnit != nil {
+					currency := derefStr(cfg.Cost.Currency)
+					unit := derefStr(cfg.Cost.Unit)
+					fmt.Fprintf(c.Err, "Estimated cost: %.2f %s/%s\n", *cfg.Cost.PricePerUnit, currency, unit)
+				}
+			}
 
 			createReq := emma.SpotCreate{
 				Name:             name,
@@ -166,6 +185,18 @@ func (c *CLI) newSpotCreateCmd() *cobra.Command {
 				VolumeGb:         volumeSize,
 				Price:            price,
 			}
+			if cmd.Flags().Changed("ssh-key-id") {
+				createReq.SshKeyId = &sshKeyID
+			}
+			if cmd.Flags().Changed("security-group-id") {
+				createReq.SecurityGroupId = &securityGroupID
+			}
+			if cmd.Flags().Changed("accelerator-type-id") {
+				createReq.AcceleratorTypeId = &acceleratorTypeID
+			}
+			if cmd.Flags().Changed("accelerators") {
+				createReq.Accelerators = &accelerators
+			}
 
 			if cmd.Flags().Changed("ssh-key-id") {
 				createReq.SshKeyId = &sshKeyID
@@ -174,6 +205,31 @@ func (c *CLI) newSpotCreateCmd() *cobra.Command {
 			spot, _, err := c.Client.SpotInstancesAPI.SpotCreate(ctx).SpotCreate(createReq).Execute()
 			if err != nil {
 				return apierrors.Format(err)
+			}
+
+			fmt.Fprintf(c.Err, "Spot %q created (ID: %d). Waiting for IP assignment...\n", derefStr(spot.Name), derefInt32(spot.Id))
+
+			spotID := *spot.Id
+			pollErr := poller.WaitFor(ctx, 5*time.Second, 60*time.Second, func() (bool, error) {
+				updated, _, err := c.Client.SpotInstancesAPI.GetSpot(ctx, spotID).Execute()
+				if err != nil {
+					if apierrors.IsNotFound(err) || apierrors.IsUnauthorized(err) {
+						return false, apierrors.Format(err)
+					}
+					return false, nil
+				}
+				for _, net := range updated.Networks {
+					if net.Ip != nil && *net.Ip != "" {
+						spot = updated
+						return true, nil
+					}
+				}
+				fmt.Fprint(c.Err, ".")
+				return false, nil
+			})
+			fmt.Fprintln(c.Err)
+			if pollErr != nil {
+				fmt.Fprintf(c.Err, "Warning: timed out waiting for IP: %v\n", pollErr)
 			}
 
 			return output.Render(c.Out, c.OutputFmt, c.NoColor, spot, output.TableView{
@@ -194,6 +250,9 @@ func (c *CLI) newSpotCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&vcpuType, "vcpu-type", "shared", "vCPU type")
 	cmd.Flags().Float32Var(&price, "price", 0, "Max price per hour")
 	cmd.Flags().Int32Var(&sshKeyID, "ssh-key-id", 0, "SSH key ID to inject (see `emma sshkey list`)")
+	cmd.Flags().Int32Var(&securityGroupID, "security-group-id", 0, "Security group ID (see `emma sg list`)")
+	cmd.Flags().StringVar(&acceleratorTypeID, "accelerator-type-id", "", "GPU accelerator type ID")
+	cmd.Flags().Float32Var(&accelerators, "accelerators", 0, "Number of GPU accelerators")
 
 	_ = cmd.MarkFlagRequired("name")
 	_ = cmd.MarkFlagRequired("datacenter-id")

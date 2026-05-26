@@ -8,6 +8,9 @@ dist/
 # Claude Code local settings
 .claude/
 
+# IDE
+.idea/
+
 # Go test cache
 *.test
 

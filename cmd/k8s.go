@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
@@ -114,19 +116,35 @@ func (c *CLI) newK8sGetCmd() *cobra.Command {
 
 func (c *CLI) newK8sCreateCmd() *cobra.Command {
 	var name, deploymentLocation, connectionType, version string
-	// Worker node flags
 	var workerName, workerDatacenterID, workerVCpuType, workerVolumeType string
 	var workerVCpu, workerRam, workerVolumeSize int32
+	var workersFile, autoscalingFile string
 
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a Kubernetes cluster",
+		Long: `Create a Kubernetes cluster.
+
+For a single worker group, use --worker-* flags.
+For multiple worker groups, use --workers-file with a JSON file:
+  [{"name":"group1","dataCenterId":"dc-1","vCpuType":"shared","vCpu":2,"ramGb":4,"volumeGb":16,"volumeType":"ssd"}]
+
+For autoscaling, use --autoscaling-file with a JSON file:
+  [{"groupName":"group1","dataCenterId":"dc-1","minimumNodes":1,"maximumNodes":5,"targetNodes":2}]`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
 
-			workerNodes := []emma.KubernetesCreateRequestWorkerNodesInner{}
-			if workerName != "" {
-				node := emma.KubernetesCreateRequestWorkerNodesInner{
+			var workerNodes []emma.KubernetesCreateRequestWorkerNodesInner
+			if workersFile != "" {
+				data, err := os.ReadFile(workersFile)
+				if err != nil {
+					return fmt.Errorf("reading workers file: %w", err)
+				}
+				if err := json.Unmarshal(data, &workerNodes); err != nil {
+					return fmt.Errorf("invalid workers JSON: %w", err)
+				}
+			} else if workerName != "" {
+				workerNodes = []emma.KubernetesCreateRequestWorkerNodesInner{{
 					Name:         workerName,
 					DataCenterId: workerDatacenterID,
 					VCpuType:     workerVCpuType,
@@ -134,8 +152,7 @@ func (c *CLI) newK8sCreateCmd() *cobra.Command {
 					RamGb:        workerRam,
 					VolumeGb:     workerVolumeSize,
 					VolumeType:   workerVolumeType,
-				}
-				workerNodes = append(workerNodes, node)
+				}}
 			}
 
 			createReq := emma.KubernetesCreateRequest{
@@ -146,6 +163,18 @@ func (c *CLI) newK8sCreateCmd() *cobra.Command {
 			}
 			if version != "" {
 				createReq.K8sVersion = &version
+			}
+
+			if autoscalingFile != "" {
+				data, err := os.ReadFile(autoscalingFile)
+				if err != nil {
+					return fmt.Errorf("reading autoscaling file: %w", err)
+				}
+				var configs []emma.KubernetesCreateRequestAutoscalingConfigsInner
+				if err := json.Unmarshal(data, &configs); err != nil {
+					return fmt.Errorf("invalid autoscaling JSON: %w", err)
+				}
+				createReq.AutoscalingConfigs = configs
 			}
 
 			cluster, _, err := c.Client.KubernetesClustersAPI.CreateKubernetesCluster(ctx).KubernetesCreateRequest(createReq).Execute()
@@ -165,7 +194,6 @@ func (c *CLI) newK8sCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&connectionType, "connection-type", "", "K8s connection type: internet_connect or direct_connect (required)")
 	cmd.Flags().StringVar(&version, "version", "", "Kubernetes version")
 
-	// Worker node flags
 	cmd.Flags().StringVar(&workerName, "worker-name", "", "Worker node group name")
 	cmd.Flags().StringVar(&workerDatacenterID, "worker-datacenter-id", "", "Worker node datacenter ID")
 	cmd.Flags().StringVar(&workerVCpuType, "worker-vcpu-type", "shared", "Worker node vCPU type")
@@ -173,6 +201,9 @@ func (c *CLI) newK8sCreateCmd() *cobra.Command {
 	cmd.Flags().Int32Var(&workerRam, "worker-ram", 0, "Worker node RAM in GB")
 	cmd.Flags().Int32Var(&workerVolumeSize, "worker-volume-size", 0, "Worker node volume size in GB")
 	cmd.Flags().StringVar(&workerVolumeType, "worker-volume-type", "", "Worker node volume type")
+
+	cmd.Flags().StringVar(&workersFile, "workers-file", "", "JSON file with multiple worker node groups")
+	cmd.Flags().StringVar(&autoscalingFile, "autoscaling-file", "", "JSON file with autoscaling configs")
 
 	_ = cmd.MarkFlagRequired("name")
 	_ = cmd.MarkFlagRequired("deployment-location")
@@ -185,6 +216,7 @@ func (c *CLI) newK8sEditCmd() *cobra.Command {
 	var id int32
 	var workerName, workerDatacenterID, workerVCpuType, workerVolumeType string
 	var workerVCpu, workerRam, workerVolumeSize int32
+	var workersFile, autoscalingFile string
 
 	cmd := &cobra.Command{
 		Use:   "edit",
@@ -192,9 +224,17 @@ func (c *CLI) newK8sEditCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
 
-			workerNodes := []emma.KubernetesUpdateRequestWorkerNodesInner{}
-			if workerName != "" {
-				node := emma.KubernetesUpdateRequestWorkerNodesInner{
+			var workerNodes []emma.KubernetesUpdateRequestWorkerNodesInner
+			if workersFile != "" {
+				data, err := os.ReadFile(workersFile)
+				if err != nil {
+					return fmt.Errorf("reading workers file: %w", err)
+				}
+				if err := json.Unmarshal(data, &workerNodes); err != nil {
+					return fmt.Errorf("invalid workers JSON: %w", err)
+				}
+			} else if workerName != "" {
+				workerNodes = []emma.KubernetesUpdateRequestWorkerNodesInner{{
 					Name:         workerName,
 					DataCenterId: workerDatacenterID,
 					VCpuType:     workerVCpuType,
@@ -202,12 +242,23 @@ func (c *CLI) newK8sEditCmd() *cobra.Command {
 					RamGb:        workerRam,
 					VolumeGb:     workerVolumeSize,
 					VolumeType:   workerVolumeType,
-				}
-				workerNodes = append(workerNodes, node)
+				}}
 			}
 
 			updateReq := emma.KubernetesUpdateRequest{
 				WorkerNodes: workerNodes,
+			}
+
+			if autoscalingFile != "" {
+				data, err := os.ReadFile(autoscalingFile)
+				if err != nil {
+					return fmt.Errorf("reading autoscaling file: %w", err)
+				}
+				var configs []emma.KubernetesUpdateRequestAutoscalingConfigsInner
+				if err := json.Unmarshal(data, &configs); err != nil {
+					return fmt.Errorf("invalid autoscaling JSON: %w", err)
+				}
+				updateReq.AutoscalingConfigs = configs
 			}
 
 			cluster, _, err := c.Client.KubernetesClustersAPI.EditKubernetesCluster(ctx, id).KubernetesUpdateRequest(updateReq).Execute()
@@ -230,6 +281,8 @@ func (c *CLI) newK8sEditCmd() *cobra.Command {
 	cmd.Flags().Int32Var(&workerRam, "worker-ram", 0, "Worker node RAM in GB")
 	cmd.Flags().Int32Var(&workerVolumeSize, "worker-volume-size", 0, "Worker node volume size in GB")
 	cmd.Flags().StringVar(&workerVolumeType, "worker-volume-type", "", "Worker node volume type")
+	cmd.Flags().StringVar(&workersFile, "workers-file", "", "JSON file with multiple worker node groups")
+	cmd.Flags().StringVar(&autoscalingFile, "autoscaling-file", "", "JSON file with autoscaling configs")
 
 	_ = cmd.MarkFlagRequired("id")
 	return cmd
