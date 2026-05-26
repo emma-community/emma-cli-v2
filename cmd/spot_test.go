@@ -66,13 +66,13 @@ func TestSpotActions_UnknownAction(t *testing.T) {
 	}
 }
 
-func TestSpotCreate_WithSshKeyId(t *testing.T) {
-	var gotReq emma.SpotCreate
+func TestSpotCreate_WithSSHKeyID(t *testing.T) {
+	var receivedBody emma.SpotCreate
 	c, _ := newTestCLI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "POST" && r.URL.Path == "/v1/spot-instances" {
-			json.NewDecoder(r.Body).Decode(&gotReq)
+			json.NewDecoder(r.Body).Decode(&receivedBody)
 			json.NewEncoder(w).Encode(emma.SpotVm{
-				Id: int32Ptr(10), Name: strPtr("spot-ssh"), Status: strPtr("POWERED_ON"),
+				Id: int32Ptr(10), Name: strPtr("test-spot"), Status: strPtr("POWERED_ON"),
 			})
 			return
 		}
@@ -80,34 +80,34 @@ func TestSpotCreate_WithSshKeyId(t *testing.T) {
 	}))
 
 	cmd := c.newSpotCreateCmd()
-	cmd.Flags().Set("name", "spot-ssh")
+	cmd.Flags().Set("name", "test-spot")
 	cmd.Flags().Set("datacenter-id", "aws-us-west-1")
 	cmd.Flags().Set("os-id", "1")
 	cmd.Flags().Set("vcpu", "2")
 	cmd.Flags().Set("ram", "4")
 	cmd.Flags().Set("volume-size", "20")
 	cmd.Flags().Set("volume-type", "ssd")
-	cmd.Flags().Set("cloud-network-type", "default")
+	cmd.Flags().Set("cloud-network-type", "multi-cloud")
 	cmd.Flags().Set("price", "0.5")
 	cmd.Flags().Set("ssh-key-id", "42")
 	if err := cmd.RunE(cmd, nil); err != nil {
-		t.Fatalf("spot create with ssh-key-id: %v", err)
+		t.Fatalf("spot create: %v", err)
 	}
-	if gotReq.SshKeyId == nil || *gotReq.SshKeyId != 42 {
-		t.Errorf("expected sshKeyId=42, got: %v", gotReq.SshKeyId)
+	if receivedBody.SshKeyId == nil || *receivedBody.SshKeyId != 42 {
+		t.Errorf("expected SshKeyId=42, got %v", receivedBody.SshKeyId)
 	}
-	if !strings.Contains(cliOut(c), "spot-ssh") {
-		t.Errorf("expected 'spot-ssh' in output")
+	if !strings.Contains(cliOut(c), "test-spot") {
+		t.Errorf("expected 'test-spot' in output")
 	}
 }
 
-func TestSpotCreate_WithoutSshKeyId(t *testing.T) {
-	var gotReq emma.SpotCreate
+func TestSpotCreate_WithoutSSHKeyID(t *testing.T) {
+	var receivedBody emma.SpotCreate
 	c, _ := newTestCLI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "POST" && r.URL.Path == "/v1/spot-instances" {
-			json.NewDecoder(r.Body).Decode(&gotReq)
+			json.NewDecoder(r.Body).Decode(&receivedBody)
 			json.NewEncoder(w).Encode(emma.SpotVm{
-				Id: int32Ptr(11), Name: strPtr("spot-no-ssh"), Status: strPtr("POWERED_ON"),
+				Id: int32Ptr(11), Name: strPtr("no-key-spot"), Status: strPtr("POWERED_ON"),
 			})
 			return
 		}
@@ -115,20 +115,20 @@ func TestSpotCreate_WithoutSshKeyId(t *testing.T) {
 	}))
 
 	cmd := c.newSpotCreateCmd()
-	cmd.Flags().Set("name", "spot-no-ssh")
+	cmd.Flags().Set("name", "no-key-spot")
 	cmd.Flags().Set("datacenter-id", "aws-us-west-1")
 	cmd.Flags().Set("os-id", "1")
 	cmd.Flags().Set("vcpu", "2")
 	cmd.Flags().Set("ram", "4")
 	cmd.Flags().Set("volume-size", "20")
 	cmd.Flags().Set("volume-type", "ssd")
-	cmd.Flags().Set("cloud-network-type", "default")
+	cmd.Flags().Set("cloud-network-type", "multi-cloud")
 	cmd.Flags().Set("price", "0.5")
 	if err := cmd.RunE(cmd, nil); err != nil {
 		t.Fatalf("spot create without ssh-key-id: %v", err)
 	}
-	if gotReq.SshKeyId != nil {
-		t.Errorf("expected sshKeyId to be nil, got: %v", *gotReq.SshKeyId)
+	if receivedBody.SshKeyId != nil {
+		t.Errorf("expected SshKeyId to be nil, got %v", *receivedBody.SshKeyId)
 	}
 }
 

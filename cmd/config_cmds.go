@@ -176,7 +176,7 @@ func (c *CLI) newK8sConfigsCmd() *cobra.Command {
 		Short: "List available Kubernetes node configurations",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.Background()
-			req := c.Client.ComputeInstancesConfigurationsAPI.GetKuberNodesConfigs(ctx, normalizeConnectionType(connectionType))
+			req := c.Client.ComputeInstancesConfigurationsAPI.GetKuberNodesConfigs(ctx).K8sConnectionType(normalizeConnectionType(connectionType))
 			if datacenterID != "" {
 				req = req.DataCenterId(datacenterID)
 			}

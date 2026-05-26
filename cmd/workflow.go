@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"strconv"
 
-	emma "github.com/emma-community/emma-go-sdk"
 	apierrors "github.com/emma-community/emma-cli/internal/apierrors"
 	"github.com/emma-community/emma-cli/internal/cmdutil"
 	"github.com/emma-community/emma-cli/internal/output"
+	emma "github.com/emma-community/emma-go-sdk"
 	"github.com/spf13/cobra"
 )
 
@@ -54,8 +54,10 @@ func (c *CLI) newWorkflowListCmd() *cobra.Command {
 				if resp.Last != nil && *resp.Last {
 					break
 				}
+				if resp.TotalPages != nil && page+1 >= *resp.TotalPages {
+					break
+				}
 				page++
-				break // safety: if Last not set, don't loop forever
 			}
 
 			rows := make([][]string, 0, len(allWorkflows))

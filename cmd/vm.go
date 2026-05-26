@@ -7,12 +7,12 @@ import (
 	"strings"
 	"time"
 
-	emma "github.com/emma-community/emma-go-sdk"
 	apierrors "github.com/emma-community/emma-cli/internal/apierrors"
 	"github.com/emma-community/emma-cli/internal/cmdutil"
 	"github.com/emma-community/emma-cli/internal/completion"
 	"github.com/emma-community/emma-cli/internal/output"
 	"github.com/emma-community/emma-cli/internal/poller"
+	emma "github.com/emma-community/emma-go-sdk"
 	"github.com/spf13/cobra"
 )
 
@@ -154,8 +154,9 @@ func (c *CLI) newVMGetCmd() *cobra.Command {
 }
 
 func (c *CLI) newVMCreateCmd() *cobra.Command {
-	var name, datacenterID, networkType, cloudNetworkType, volumeType, vcpuType string
-	var osID, vcpu, ram, volumeSize, sshKeyID int32
+	var name, datacenterID, networkType, cloudNetworkType, volumeType, vcpuType, subnetworkID, acceleratorTypeID string
+	var osID, vcpu, ram, volumeSize, sshKeyID, securityGroupID int32
+	var accelerators float32
 
 	cmd := &cobra.Command{
 		Use:   "create",
@@ -196,6 +197,18 @@ func (c *CLI) newVMCreateCmd() *cobra.Command {
 			}
 			if cmd.Flags().Changed("ssh-key-id") {
 				createReq.SshKeyId = &sshKeyID
+			}
+			if cmd.Flags().Changed("security-group-id") {
+				createReq.SecurityGroupId = &securityGroupID
+			}
+			if cmd.Flags().Changed("subnet-id") {
+				createReq.SubnetworkId = &subnetworkID
+			}
+			if cmd.Flags().Changed("accelerator-type-id") {
+				createReq.AcceleratorTypeId = &acceleratorTypeID
+			}
+			if cmd.Flags().Changed("accelerators") {
+				createReq.Accelerators = &accelerators
 			}
 
 			vm, _, err := c.Client.VirtualMachinesAPI.VmCreate(ctx).VmCreate(createReq).Execute()
@@ -247,6 +260,10 @@ func (c *CLI) newVMCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&networkType, "network-type", "", "Network type")
 	cmd.Flags().StringVar(&vcpuType, "vcpu-type", "shared", "vCPU type (default: shared)")
 	cmd.Flags().Int32Var(&sshKeyID, "ssh-key-id", 0, "SSH key ID to inject (see `emma sshkey list`)")
+	cmd.Flags().Int32Var(&securityGroupID, "security-group-id", 0, "Security group ID (see `emma sg list`)")
+	cmd.Flags().StringVar(&subnetworkID, "subnet-id", "", "Subnetwork ID (see `emma subnet list`)")
+	cmd.Flags().StringVar(&acceleratorTypeID, "accelerator-type-id", "", "GPU accelerator type ID (see `emma provider accelerator-list`)")
+	cmd.Flags().Float32Var(&accelerators, "accelerators", 0, "Number of GPU accelerators")
 
 	_ = cmd.MarkFlagRequired("name")
 	_ = cmd.MarkFlagRequired("datacenter-id")
